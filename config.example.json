@@ -1,0 +1,13 @@
+{
+  "placesApiKey": "AIza... (required for scan — Google Cloud Console, enable Places API (New))",
+  "proxy": null,
+  "quota": { "limit": 5000, "warnAt": 4000 },
+  "llm": {
+    "enabled": true,
+    "baseUrl": "https://api.openai.com/v1",
+    "model": "gpt-4o-mini",
+    "apiKey": "sk-..."
+  },
+  "site": "https://your-company-website.com/",
+  "peerSites": ["https://competitor-a.com/", "https://competitor-b.com/"]
+}

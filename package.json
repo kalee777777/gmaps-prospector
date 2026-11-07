@@ -1,0 +1,14 @@
+{
+  "name": "gmaps-prospector",
+  "version": "0.1.0",
+  "description": "Compliant Google Maps lead generation engine — official Places API + a self-deriving keyword engine (your website → keywords, learn from competitors) + evidence-based email mining.",
+  "type": "module",
+  "bin": { "gmaps-prospector": "src/cli.mjs" },
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node src/cli.mjs"
+  },
+  "keywords": ["google-maps", "lead-generation", "b2b", "places-api", "prospecting", "outbound", "keyword-research", "email-finder", "foreign-trade", "export"],
+  "license": "MIT",
+  "dependencies": { "undici": "^7.0.0" }
+}
