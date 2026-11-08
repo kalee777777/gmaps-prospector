@@ -9,11 +9,11 @@
 //
 // Scoring: A = reseller keyword + website + phone · B = reseller missing one, or complete end-user
 //          C = incomplete end-user · D = manufacturer-looking names (peers) — excluded.
-import { copyFileSync, existsSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, writeFileSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { ROOT, loadConfig, readJson } from './config.mjs'
 import { buildCatalog } from './catalog.mjs'
-import { readKeywords, writeKeywords, deriveFromCatalog, learnPeers } from './keywords.mjs'
+import { readKeywords, writeKeywords, deriveFromCatalog, learnPeers, buildTaskPrompt, parseReply, applyReply, scrapePeers } from './keywords.mjs'
 import { runScan, readLeads } from './scan.mjs'
 import { runEnrich } from './enrich.mjs'
 
@@ -53,20 +53,64 @@ async function main() {
 
   if (cmd === 'keywords') {
     if (!cfg.site) { console.error('✗ set "site" in config.json first (your product website)'); process.exit(1) }
+    const kwFile = join(ROOT, 'data', 'keywords.json')
+
+    // --reply: absorb a pasted AI answer (zero-key paste mode, step 3 of 3)
+    if (flag('reply')) {
+      const replyPath = join(ROOT, 'data', 'llm-reply.md')
+      if (!existsSync(replyPath)) { console.error(`✗ ${replyPath} not found — paste the AI's answer into that file first`); process.exit(1) }
+      const kws = readKeywords()
+      const reply = parseReply(readFileSync(replyPath, 'utf8'))
+      const { counts, intel } = applyReply(kws, reply)
+      writeKeywords(kws)
+      writeFileSync(join(ROOT, 'data', 'peer-intel.json'), JSON.stringify(intel, null, 2) + '\n')
+      const total = kws.lines.reduce((n, l) => n + l.keywords.channel.length + l.keywords.enduser.length, 0)
+      console.log(`✓ absorbed +${counts.llm} LLM words · +${counts.peer} peer words → ${total} active keywords`)
+      if (intel.seoWords.length) console.log(`  ${intel.seoWords.length} manufacturer-words → data/peer-intel.json (your site SEO)`)
+      if (intel.productGaps.length) console.log(`  product gaps: ${intel.productGaps.join(' · ')}`)
+      console.log(`  next: scan --line ${kws.lines[0]?.id} --city "${kws.cities[0]?.city}"`)
+      return
+    }
+
     const llm = flag('no-llm') ? null : cfg.llm
     console.log(`[1/3] crawling your catalog: ${cfg.site}`)
     const catalog = await buildCatalog(cfg.site, { proxy: cfg.proxy })
     console.log(`      ${catalog.products.length} products (${catalog.products.slice(0, 3).map(p => p.name).join(', ')}${catalog.products.length > 3 ? '…' : ''})`)
     const kws = readKeywords()
-    console.log(`[2/3] deriving keywords ${llm ? `(rules + LLM: ${llm.model})` : '(rules only — enable llm in config for buyer-perspective words)'}`)
-    const counts = await deriveFromCatalog(kws, catalog, llm)
-    console.log(`      +${counts.rule} rule words · +${counts.llm} LLM words`)
-    console.log(`[3/3] learning from ${cfg.peerSites.length} peer sites…`)
-    const intel = await learnPeers(kws, cfg.peerSites, llm, { proxy: cfg.proxy })
-    if (intel.seoWords?.length) console.log(`      peer words sorted; ${intel.seoWords.length} manufacturer-words saved to data/peer-intel.json (feed YOUR site SEO, never searched)`)
-    if (intel.productGaps?.length) console.log(`      product gaps worth a look: ${intel.productGaps.join(' · ')}`)
-    writeKeywords(kws)
-    writeFileSync(join(ROOT, 'data', 'peer-intel.json'), JSON.stringify(intel, null, 2) + '\n')
+
+    if (llm) {
+      console.log(`[2/3] deriving keywords (rules + LLM: ${llm.model})`)
+      const counts = await deriveFromCatalog(kws, catalog, llm)
+      console.log(`      +${counts.rule} rule words · +${counts.llm} LLM words`)
+      console.log(`[3/3] learning from ${cfg.peerSites.length} peer sites…`)
+      const intel = await learnPeers(kws, cfg.peerSites, llm, { proxy: cfg.proxy })
+      if (intel.seoWords?.length) console.log(`      peer words sorted; ${intel.seoWords.length} manufacturer-words saved to data/peer-intel.json (feed YOUR site SEO, never searched)`)
+      if (intel.productGaps?.length) console.log(`      product gaps worth a look: ${intel.productGaps.join(' · ')}`)
+      writeKeywords(kws)
+      writeFileSync(join(ROOT, 'data', 'peer-intel.json'), JSON.stringify(intel, null, 2) + '\n')
+    } else {
+      console.log(`[2/3] deriving keywords (rules only — no LLM key configured)`)
+      const counts = await deriveFromCatalog(kws, catalog, null)
+      console.log(`      +${counts.rule} rule words`)
+      console.log(`[3/3] scraping ${cfg.peerSites.length} peer sites…`)
+      const peerWords = await scrapePeers(cfg.peerSites, { proxy: cfg.proxy })
+      const prompt = buildTaskPrompt(kws, catalog, peerWords)
+      writeFileSync(join(ROOT, 'data', 'llm-task.md'),
+        `# gmaps-prospector · LLM task (zero-key paste mode)\n\n` +
+        `No LLM API key needed. THREE STEPS:\n` +
+        `  1. Copy EVERYTHING below the ---- line\n` +
+        `  2. Paste it into any AI (ChatGPT / Trae / Claude / DeepSeek — the chat you already have)\n` +
+        `  3. Save its JSON answer to data/llm-reply.md, then run: node src/cli.mjs keywords --reply\n\n` +
+        `---- COPY FROM HERE ----\n\n${prompt}\n`)
+      writeKeywords(kws)
+      console.log(`\n✓ rules done (+${counts.rule}). LLM part is waiting for you — ZERO API KEY needed:`)
+      console.log(`  1. open data/llm-task.md and copy the task below the ---- line`)
+      console.log(`  2. paste it into ChatGPT / Trae / Claude / any AI you already use`)
+      console.log(`  3. save the AI's JSON answer to data/llm-reply.md`)
+      console.log(`  4. run: node src/cli.mjs keywords --reply`)
+      console.log(`  (or configure "llm" in config.json to have the CLI call an API directly)`)
+      return
+    }
     const total = kws.lines.reduce((n, l) => n + l.keywords.channel.length + l.keywords.enduser.length, 0)
     console.log(`✓ ${total} active keywords in ${kws.lines.length} lines → next: scan --line ${kws.lines[0]?.id} --city "${kws.cities[0]?.city}"`)
     return

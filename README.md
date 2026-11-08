@@ -80,8 +80,8 @@ After `git clone` + `npm install` you have a working CLI (`node src/cli.mjs`). W
 |---|---|
 | nothing | `init`, `scan --mock` (built-in sample, zero quota) |
 | + placesApiKey | real scans, scoring, export |
-| + site | keyword derivation from your own catalog |
-| + llm | buyer-perspective words + peer learning + product-gap report |
+| + site | keyword derivation from your own catalog (rules) |
+| + llm key **or** paste mode **or** an agentic client | buyer-perspective words + peer learning + product-gap report |
 | + peerSites | competitor word learning |
 
 Requires **Node ≥ 22**. One dependency (`undici`, for proxy support).
@@ -157,6 +157,30 @@ Notes:
 - Reasoning-style models (e.g. GLM-4.6) occasionally return empty content when chain-of-thought eats the token budget; the caller retries, but a plain model like `gpt-4o-mini` is the steadiest default.
 - Monthly quota is tracked in `data/quota.json` and enforced before every run.
 
+## No LLM key? Two zero-key ways
+
+The LLM steps are one-shot text transformations — they don't need an API key at all:
+
+**Paste mode (works with any chat AI you already have):**
+
+```
+node src/cli.mjs keywords      # rules run, then writes data/llm-task.md
+# ① open data/llm-task.md → copy the task below the ---- line
+# ② paste it into ChatGPT / Trae / Claude / DeepSeek — whatever you already use
+# ③ save the AI's JSON answer to data/llm-reply.md
+node src/cli.mjs keywords --reply   # absorbed into your pools
+```
+
+**Agent mode (Trae / Cursor / Claude Code / Codex):** the repo ships an `AGENTS.md`.
+Open the repo in your agentic client and just say *"set this up and build my keywords"* —
+the agent runs the CLI, does the LLM sorting itself with its own model, and absorbs the result.
+No key configuration of any kind; the only hard requirement remains the Google Places API key.
+
+| Key | Required? | For |
+|---|---|---|
+| Google Places API key | **yes** (for real scans; 5,000 free/month) | searching Google Maps |
+| LLM API key | no — paste mode or agent mode replaces it | keyword expansion & peer sorting |
+
 ## Commands
 
 ```
@@ -176,7 +200,7 @@ export [--tier A] [--format csv|json]
 
 ## 中文用户
 
-外贸主动获客引擎：官方 Places API 合规路线（每月 5,000 次免费额度），核心差异是**词库自动派生**——爬你自己官网产品目录自动生成渠道词、AI 生成买家视角业态词、学同行官网投放词（manufacturer 词自动分流给你自己的官网 SEO），三池判级 🅰🅱🅲🅳（同行自动排除），邮箱只认 mailto/同域两层实据，CSV 一键导出进你的开发信系统。大陆网络在 `config.json` 配 `proxy` 即可。
+外贸主动获客引擎：官方 Places API 合规路线（每月 5,000 次免费额度），核心差异是**词库自动派生**——爬你自己官网产品目录自动生成渠道词、AI 生成买家视角业态词、学同行官网投放词（manufacturer 词自动分流给你自己的官网 SEO），三池判级 🅰🅱🅲🅳（同行自动排除），邮箱只认 mailto/同域两层实据，CSV 一键导出进你的开发信系统。大陆网络在 `config.json` 配 `proxy` 即可。**不需要 LLM API key**：`keywords` 命令会把 AI 任务写成文件，复制给 ChatGPT/豆包/Trae 任意对话 AI 再粘回来即可；或在 Trae/Cursor 里打开仓库直接让 Agent 代跑（见 AGENTS.md）。
 
 完整方法论（词库工程/判级/邮箱纪律/开发信衔接/工作台全自动化）见配套实战课程：[AI 外贸课程体系](https://www.kestrelmetal.com/)（中文，含 58+ 门外贸 AI 实操课）。
 

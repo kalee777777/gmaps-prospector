@@ -64,6 +64,14 @@ export async function llmJson(llm, system, user) {
 // compile match patterns (stored as strings in JSON — RegExp can't be serialized)
 const rxs = (line) => (line.match || []).map(m => (m instanceof RegExp ? m : new RegExp(String(m), 'i')))
 
+const absorb = (line, pool, words, source, seen, counts) => {
+  for (const raw of (words || [])) {
+    const w = norm(raw).replace(/[^a-z0-9\s&'-]/g, '').trim()
+    if (!w || w.length < 5 || w.length > 60 || /(manufactur|fabricat|factory)/.test(w) || seen.has(w)) continue
+    seen.add(w); line.keywords[pool].push(w); line.wordSource[w] = source; counts[source] = (counts[source] || 0) + 1
+  }
+}
+
 export async function deriveFromCatalog(keywords, catalog, llm) {
   const counts = { rule: 0, llm: 0 }
   for (const line of keywords.lines) {
@@ -86,13 +94,8 @@ export async function deriveFromCatalog(keywords, catalog, llm) {
         const out = await llmJson(llm,
           'You are a US B2B building-materials lead-gen keyword expert. Output unique English search phrases only. Never company names. Never words containing manufacturer/fabricator/factory (those find competitors, not customers). JSON only.',
           `We are a Chinese manufacturer of "${line.name}" selling to US resellers and end users.\nProducts:\n${mine.slice(0, 12).map(p => `- ${p.name}`).join('\n')}\n\nGenerate buyer-perspective search phrases (industry jargon / use-cases, not factory terms):\n1. channel pool: <=12 phrases "industry product name + reseller word" (e.g. "wire mesh fence wholesaler")\n2. enduser pool: <=10 business types that buy these products (e.g. "perimeter fencing contractor", "dog boarding kennel")\n\nJSON: {"channel":[],"enduser":[]}`)
-        for (const pool of ['channel', 'enduser']) {
-          for (const raw of out[pool] || []) {
-            const w = norm(raw).replace(/[^a-z0-9\s&'-]/g, '').trim()
-            if (!w || w.length < 5 || w.length > 60 || /(manufactur|fabricat|factory)/.test(w) || seen.has(w)) continue
-            seen.add(w); line.keywords[pool].push(w); line.wordSource[w] = 'llm'; counts.llm++
-          }
-        }
+        absorb(line, 'channel', out.channel, 'llm', seen, counts)
+        absorb(line, 'enduser', out.enduser, 'llm', seen, counts)
       } catch (e) { console.log(`  [${line.id}] LLM expansion degraded to rules-only: ${e.message}`) }
     }
   }
@@ -152,4 +155,89 @@ export async function learnPeers(keywords, peerSites, llm, { proxy } = {}) {
     productGaps: (out.productGaps || []).map(String).slice(0, 6),
     learnedAt: new Date().toISOString()
   }
+}
+
+// ===== Zero-key LLM modes (paste / agent) =====
+// The LLM steps are one-shot text transformations, so they don't need an API key:
+//   paste mode — CLI writes data/llm-task.md, the user pastes it into ANY chat AI
+//                (ChatGPT / Trae / Claude / DeepSeek web…), saves the answer to
+//                data/llm-reply.md, then reruns `keywords --reply`
+//   agent mode — an agentic client (Trae / Cursor / Claude Code…) reads AGENTS.md
+//                and completes the same task itself using its own model
+export function buildTaskPrompt(keywords, catalog, peerWords) {
+  const parts = []
+  for (const line of keywords.lines) {
+    const compiled = rxs(line)
+    const mine = catalog.products.filter(p => compiled.some(rx => rx.test(p.name) || p.keywords.some(k => rx.test(k)))).slice(0, 12)
+    if (!mine.length) continue
+    parts.push(`[LINE ${line.id}] products:\n${mine.map(p => `- ${p.name}`).join('\n')}`)
+  }
+  const peerBlock = peerWords.length ? `\n[PEER WORDS scraped from competitor sites]\n${peerWords.slice(0, 80).map(w => '- ' + w).join('\n')}` : ''
+  return `You are helping a B2B manufacturer build Google Maps prospecting keywords. They sell to US resellers and end users.
+${parts.join('\n\n')}
+${peerBlock}
+
+Produce ONE JSON object (markdown fences are fine):
+{
+  "lines": [
+    { "id": "<line id>", "channel": ["<=12 phrases: industry product name + reseller word, e.g. 'wire mesh fence wholesaler'"],
+      "enduser": ["<=10 business types that buy these, e.g. 'perimeter fencing contractor', 'dog boarding kennel'"] }
+  ],${peerWords.length ? `
+  "peer": { "channel": ["<=10 reseller-intent words from the competitor list"],
+            "enduser": ["<=8 business types"],
+            "seo": ["<=15 manufacturer-oriented words (manufacturer/factory/China) — NOT for prospecting"],
+            "productGaps": ["<=6 product concepts competitors have that the manufacturer might not"] },` : ''}
+  "notes": "one line of caveats if any"
+}
+
+Rules: unique English phrases; no company names; never include words containing manufacturer/fabricator/factory in channel/enduser (those find competitors, not customers); use industry jargon and use-cases buyers actually search, not factory terms.`
+}
+
+// Parse a pasted AI reply (tolerant: markdown fences, prose around JSON, trailing commas)
+export function parseReply(replyText) {
+  const cleaned = String(replyText).replace(/```[a-zA-Z]*\n?/g, '').trim()
+  const m = cleaned.match(/\{[\s\S]*\}/)
+  if (!m) throw new Error('no JSON object found in data/llm-reply.md — make sure the AI answered with the JSON block')
+  return JSON.parse(m[0].replace(/,\s*([}\]])/g, '$1'))
+}
+
+// Apply a parsed reply (same absorption + defenses as the online path)
+export function applyReply(keywords, reply) {
+  const counts = { llm: 0, peer: 0 }
+  for (const lineReply of reply.lines || []) {
+    const line = keywords.lines.find(l => l.id === lineReply.id)
+    if (!line) continue
+    line.wordSource ||= {}
+    const seen = new Set([...(line.keywords.channel || []), ...(line.keywords.enduser || [])].map(norm))
+    absorb(line, 'channel', lineReply.channel, 'llm', seen, counts)
+    absorb(line, 'enduser', lineReply.enduser, 'llm', seen, counts)
+  }
+  const peer = reply.peer || {}
+  const first = keywords.lines[0]
+  if (first && (peer.channel?.length || peer.enduser?.length)) {
+    first.wordSource ||= {}
+    const seen = new Set([...(first.keywords.channel || []), ...(first.keywords.enduser || [])].map(norm))
+    absorb(first, 'channel', peer.channel, 'peer', seen, counts)
+    absorb(first, 'enduser', peer.enduser, 'peer', seen, counts)
+  }
+  const intel = {
+    learnedAt: new Date().toISOString(),
+    seoWords: [...new Set((peer.seo || []).map(norm))].slice(0, 15),
+    productGaps: (peer.productGaps || []).map(String).slice(0, 6)
+  }
+  return { counts, intel }
+}
+
+// Scrape peer sites without any LLM (the sorting happens later, online or via reply)
+export async function scrapePeers(peerSites, { proxy } = {}) {
+  const raw = new Set()
+  for (const site of peerSites.slice(0, 5)) {
+    try {
+      const html = await fetcher(site, { signal: AbortSignal.timeout(15000), headers: { 'User-Agent': 'Mozilla/5.0 gmaps-prospector/0.1' } }, proxy).then(r => r.ok ? r.text() : null)
+      if (html) wordsFromSite(html).forEach(w => raw.add(w))
+      console.log(`      scraped ${site} → ${raw.size} words so far`)
+    } catch { console.log(`      ${site} unreachable, skipped`) }
+    await new Promise(r => setTimeout(r, 400))
+  }
+  return [...raw]
 }

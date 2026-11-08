@@ -8,3 +8,5 @@ data/keywords.json
 data/leads.json
 data/quota.json
 data/peer-intel.json
+data/llm-task.md
+data/llm-reply.md
