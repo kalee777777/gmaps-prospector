@@ -57,6 +57,61 @@ node src/cli.mjs export --tier A --format csv
 
 No key yet? `scan --mock` runs the whole pipeline on a built-in sample, zero quota.
 
+## What's in the box
+
+```
+gmaps-prospector/
+├── src/
+│   ├── cli.mjs        # 5 commands: init · keywords · scan · enrich · export
+│   ├── catalog.mjs    # crawls YOUR product site → catalog (2-level: home → category → product)
+│   ├── keywords.mjs   # the keyword engine: 4 sources, 3 pools, peer-learning + product-gap report
+│   ├── places.mjs     # official Places API client (+ proxy support via undici)
+│   ├── scan.mjs       # scan pipeline: pools × city → score → dedupe → quota tracking
+│   ├── score.mjs      # tier rules A/B/C/D (pure logic, auditable)
+│   └── enrich.mjs     # evidence-based email mining (mailto: / same-domain only)
+├── data/                        # YOUR data (gitignored): keywords.json · leads.json · quota.json
+├── config.json                  # YOUR keys (gitignored — created by `init`)
+└── examples/sample-leads.csv    # what the export looks like
+```
+
+After `git clone` + `npm install` you have a working CLI (`node src/cli.mjs`). What works depends on how far you configure:
+
+| Setup | What works |
+|---|---|
+| nothing | `init`, `scan --mock` (built-in sample, zero quota) |
+| + placesApiKey | real scans, scoring, export |
+| + site | keyword derivation from your own catalog |
+| + llm | buyer-perspective words + peer learning + product-gap report |
+| + peerSites | competitor word learning |
+
+Requires **Node ≥ 22**. One dependency (`undici`, for proxy support).
+
+## Adapt it to YOUR industry
+
+The starter keyword file (created by `init`) uses fencing as an example — the repo author sells fences. Point it at your trade, this is the one file you must edit:
+
+```jsonc
+// data/keywords.json
+{
+  "lines": [
+    {
+      "id": "textile",                            // used by --line
+      "name": "home textiles",
+      "match": ["towel", "bedding", "blanket"],   // which catalog products belong to this line
+      "keywords": {
+        "channel": ["towel wholesaler", "home textile importer"],  // your seed phrases
+        "enduser": ["hotel supply company"],
+        "peer": ["towel manufacturer"]
+      }
+    }
+  ],
+  "cities": [{ "country": "US", "city": "New York, NY" }],
+  "blacklist": ["walmart", "target", "amazon"]
+}
+```
+
+Then `keywords` grows the rest from your catalog — you seed 5 phrases, the engine fills the pool to 100+.
+
 ## Scoring
 
 Pure rules — deterministic, auditable, no AI needed at scoring time:

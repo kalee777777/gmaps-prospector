@@ -1,0 +1,7 @@
+tier,company,city,phone,website,email,rating,reviews,status,reasons
+A,"Lonestar Fence Supply","Houston, TX",+1 713 555 0100,https://www.example-fencesupply.com,sales@example-fencesupply.com,4.6,132,new,"reseller keyword ""fence distributor"" match; website+phone complete"
+A,"Gulf Coast Wire & Fence","Houston, TX",+1 713 555 0117,https://example-gulfcoastfence.com,,4.3,88,new,"reseller keyword match; website+phone complete"
+B,"Big State Contractors","Houston, TX",+1 281 555 0142,https://example-bigstate.com,,4.8,204,new,"end-user keyword ""fencing contractor"" match, contact complete"
+B,"Ace Hardware #2241","Houston, TX",+1 713 555 0180,,,4.1,412,new,"reseller keyword match but missing website"
+C,"Sunrise Pet Resort","Houston, TX",,,https://example-sunrisepets.com,4.9,67,new,"end-user keyword ""dog boarding kennel"" match, contact incomplete"
+D,"MaxStop Perimeter Fencing Manufacturer","Houston, TX",+1 832 555 0155,https://example-maxstop.com,,4.0,12,new,"company name looks like a manufacturer/fabricator → peer pool"
